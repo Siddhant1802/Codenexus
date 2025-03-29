@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Play, Download, Copy, Settings, Code2, Terminal } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -15,11 +15,104 @@ const languages = [
   { id: 'csharp', name: 'C#', icon: '#' },
 ];
 
+const starterTemplates = {
+  python: `# Python Online Compiler
+# Write your Python code here and click Run to execute
+
+message = "Try CodeNexus"
+print(message)`,
+
+  javascript: `// JavaScript Online Compiler
+// Write your JavaScript code here and click Run to execute
+
+const message = "Try CodeNexus";
+console.log(message);`,
+
+  java: `// Java Online Compiler
+// Write your Java code here and click Run to execute
+
+class Main {
+    public static void main(String[] args) {
+        String message = "Try CodeNexus";
+        System.out.println(message);
+    }
+}`,
+
+  cpp: `// C++ Online Compiler
+// Write your C++ code here and click Run to execute
+
+#include <iostream>
+using namespace std;
+
+int main() {
+    string message = "Try CodeNexus";
+    cout << message << endl;
+    return 0;
+}`,
+
+  ruby: `# Ruby Online Compiler
+# Write your Ruby code here and click Run to execute
+
+message = "Try CodeNexus"
+puts message`,
+
+  go: `// Go Online Compiler
+// Write your Go code here and click Run to execute
+
+package main
+
+import "fmt"
+
+func main() {
+    message := "Try CodeNexus"
+    fmt.Println(message)
+}`,
+
+  rust: `// Rust Online Compiler
+// Write your Rust code here and click Run to execute
+
+fn main() {
+    let message = "Try CodeNexus";
+    println!("{}", message);
+}`,
+
+  php: `<?php
+// PHP Online Compiler
+// Write your PHP code here and click Run to execute
+
+$message = "Try CodeNexus";
+echo $message;`,
+
+  swift: `// Swift Online Compiler
+// Write your Swift code here and click Run to execute
+
+let message = "Try CodeNexus"
+print(message)`,
+
+  csharp: `// C# Online Compiler
+// Write your C# code here and click Run to execute
+
+using System;
+
+class Program {
+    static void Main() {
+        string message = "Try CodeNexus";
+        Console.WriteLine(message);
+    }
+}`
+};
+
 function App() {
-  const [code, setCode] = useState('# Write your code here\nprint("Hello, CodeNexus!")');
-  const [output, setOutput] = useState('');
   const [selectedLang, setSelectedLang] = useState('python');
+  const [code, setCode] = useState(starterTemplates.python);
+  const [output, setOutput] = useState('');
   const [theme, setTheme] = useState('dark');
+  const preRef = useRef<HTMLPreElement>(null);
+
+  const handleLanguageChange = (langId: string) => {
+    setSelectedLang(langId);
+    setCode(starterTemplates[langId as keyof typeof starterTemplates]);
+  };
 
   const handleRunCode = () => {
     setOutput('');
@@ -33,9 +126,23 @@ function App() {
 
     setTimeout(() => {
       clearInterval(loadingInterval);
-      setOutput('Program output:\nHello, CodeNexus!\n\nExecution completed successfully ✨');
+      setOutput('Program output:\nTry CodeNexus\n\nExecution completed successfully ✨');
     }, 1500);
   };
+
+  useEffect(() => {
+    if (preRef.current) {
+      const commentRegex = selectedLang === 'python' || selectedLang === 'ruby' 
+        ? /(#.+)$/gm 
+        : /(\/\/.+)$/gm;
+      
+      const highlightedCode = code.replace(
+        commentRegex,
+        '<span class="comment">$1</span>'
+      );
+      preRef.current.innerHTML = highlightedCode;
+    }
+  }, [code, selectedLang]);
 
   return (
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'} flex flex-col`}>
@@ -80,7 +187,7 @@ function App() {
                 key={lang.id}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setSelectedLang(lang.id)}
+                onClick={() => handleLanguageChange(lang.id)}
                 className={`w-12 h-12 rounded-lg flex items-center justify-center text-lg font-bold ${
                   selectedLang === lang.id 
                     ? 'bg-blue-500 text-white' 
@@ -127,14 +234,19 @@ function App() {
                   ))}
                 </div>
               </div>
-              <textarea
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className={`flex-1 w-full p-4 font-mono text-sm focus:outline-none ${
-                  theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'
-                }`}
-                spellCheck="false"
-              />
+              <div className="code-editor flex-1">
+                <textarea
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  className={`w-full h-full p-4 font-mono text-sm focus:outline-none ${
+                    theme === 'dark' ? 'text-gray-100' : 'text-gray-900'
+                  }`}
+                  spellCheck="false"
+                />
+                <pre ref={preRef} className={`font-mono text-sm ${
+                  theme === 'dark' ? 'bg-gray-800' : 'bg-white'
+                }`}></pre>
+              </div>
             </div>
           </motion.div>
         </div>
