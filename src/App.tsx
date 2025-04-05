@@ -2,6 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { Play, Download, Copy, Upload, Terminal } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+type APIResponse = {
+    execution_output: string,
+    execution_error: string,
+    static_analysis_output: string,
+    static_analysis_error: string
+}
+
 const languages = [
     { id: 'python', name: 'Python', src: '/python-logo.svg', ext: 'py' },
     {
@@ -80,22 +87,40 @@ function App() {
         setCode(starterTemplates[langId as keyof typeof starterTemplates]);
     };
 
-    const handleRunCode = () => {
+    const handleRunCode = async () => {
         setOutput('');
         const dots = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         let i = 0;
 
         const loadingInterval = setInterval(() => {
-            setOutput((prev) => prev + dots[i] + ' Executing...\n');
+            setOutput(() => dots[i] + ' Executing...\n');
             i = (i + 1) % dots.length;
         }, 100);
 
-        setTimeout(() => {
-            clearInterval(loadingInterval);
-            setOutput(
-                'Program output:\nTry CodeNexus\n\nExecution completed successfully ✨'
-            );
-        }, 1500);
+        const ext = languages.find((lang) => lang.id === selectedLang)?.ext;
+        const fileName = `code.${ext}`;
+        const blob = new Blob([code], { type: 'text/plain' }); // optionally use more accurate MIME type
+        const file = new File([blob], fileName, { type: 'text/plain' });
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('language', selectedLang);
+
+        try {
+            const res = await fetch('http://code-nexus-alb-134423841.us-east-2.elb.amazonaws.com/execute_code', {
+                method: 'POST',
+                body: formData,
+            });
+
+            const result: APIResponse = await res.json();
+            console.log('Execution result:', result);
+            setOutput(result.execution_output + result.static_analysis_output)
+        } catch (err) {
+            console.error('Upload failed:', err);
+            setOutput(JSON.stringify(err))
+        }
+
+        clearInterval(loadingInterval);
     };
 
     const handleCopyCode = () => {
@@ -140,8 +165,15 @@ function App() {
 
         setError('');
         setSelectedLang('');
-        const extensionToLanguage = (ext: string) => ({ py: 'python', js: 'javascript', java: 'java', cpp: 'cpp', go: 'go' }[ext] || 'plaintext');
-        setSelectedLang(extensionToLanguage(file.name.split('.').pop() || ""))
+        const extensionToLanguage = (ext: string) =>
+            ({
+                py: 'python',
+                js: 'javascript',
+                java: 'java',
+                cpp: 'cpp',
+                go: 'go',
+            }[ext] || 'plaintext');
+        setSelectedLang(extensionToLanguage(file.name.split('.').pop() || ''));
 
         const reader = new FileReader();
         reader.onload = (e) => {
