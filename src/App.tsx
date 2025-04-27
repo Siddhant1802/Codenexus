@@ -1,13 +1,66 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Download, Copy, Upload, Terminal } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { UseQueryResult, useQuery, useQueries } from '@tanstack/react-query';
 
-type APIResponse = {
-    execution_output: string,
-    execution_error: string,
-    static_analysis_output: string,
-    static_analysis_error: string
-}
+type SubmitAPIResponse = {
+    submission_id: string;
+    job: {
+        submission_id: string;
+        language: string;
+        code_key: string;
+        input_key: string | null;
+    };
+    status: string;
+};
+
+type ExecAPIResponse = {
+    language: string;
+    status: string;
+    success: boolean;
+    stdout: string;
+    stderr: string;
+};
+
+type StaticAnaAPIResponse = {
+    success: boolean;
+    language: string;
+    tool: string;
+    timestamp: string;
+    analysis: {
+        errors: [];
+        generated_at: string;
+        metrics: {
+            './code.py': {
+                'CONFIDENCE.HIGH': number;
+                'CONFIDENCE.LOW': number;
+                'CONFIDENCE.MEDIUM': number;
+                'CONFIDENCE.UNDEFINED': number;
+                'SEVERITY.HIGH': number;
+                'SEVERITY.LOW': number;
+                'SEVERITY.MEDIUM': number;
+                'SEVERITY.UNDEFINED': number;
+                loc: number;
+                nosec: number;
+                skipped_tests: number;
+            };
+            _totals: {
+                'CONFIDENCE.HIGH': number;
+                'CONFIDENCE.LOW': number;
+                'CONFIDENCE.MEDIUM': number;
+                'CONFIDENCE.UNDEFINED': number;
+                'SEVERITY.HIGH': number;
+                'SEVERITY.LOW': number;
+                'SEVERITY.MEDIUM': number;
+                'SEVERITY.UNDEFINED': number;
+                loc: number;
+                nosec: number;
+                skipped_tests: number;
+            };
+        };
+        results: [];
+    };
+};
 
 const languages = [
     { id: 'python', name: 'Python', src: '/python-logo.svg', ext: 'py' },
@@ -73,54 +126,22 @@ func main() {
 function App() {
     const [selectedLang, setSelectedLang] = useState('python');
     const [code, setCode] = useState(starterTemplates.python);
+    const [userInput, setUserInput] = useState('');
     const [output, setOutput] = useState('');
     const [theme, setTheme] = useState('dark');
     const preRef = useRef<HTMLPreElement>(null);
 
+    const loadingIntervalRef = useRef<number | null>(null);
+
     // States for handling file upload functionality
-    const [error, setError] = useState('');
+    const [fileError, setFileError] = useState('');
     const allowedExtensions = ['py', 'js', 'java', 'cpp', 'go'];
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const codeFileInputRef = useRef<HTMLInputElement>(null);
+    const inputFileInputRef = useRef<HTMLInputElement>(null);
 
     const handleLanguageChange = (langId: string) => {
         setSelectedLang(langId);
         setCode(starterTemplates[langId as keyof typeof starterTemplates]);
-    };
-
-    const handleRunCode = async () => {
-        setOutput('');
-        const dots = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let i = 0;
-
-        const loadingInterval = setInterval(() => {
-            setOutput(() => dots[i] + ' Executing...\n');
-            i = (i + 1) % dots.length;
-        }, 100);
-
-        const ext = languages.find((lang) => lang.id === selectedLang)?.ext;
-        const fileName = `code.${ext}`;
-        const blob = new Blob([code], { type: 'text/plain' }); // optionally use more accurate MIME type
-        const file = new File([blob], fileName, { type: 'text/plain' });
-
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('language', selectedLang);
-
-        try {
-            const res = await fetch('http://code-nexus-alb-134423841.us-east-2.elb.amazonaws.com/execute_code', {
-                method: 'POST',
-                body: formData,
-            });
-
-            const result: APIResponse = await res.json();
-            console.log('Execution result:', result);
-            setOutput(result.execution_output + result.static_analysis_output)
-        } catch (err) {
-            console.error('Upload failed:', err);
-            setOutput(JSON.stringify(err))
-        }
-
-        clearInterval(loadingInterval);
     };
 
     const handleCopyCode = () => {
@@ -145,17 +166,19 @@ function App() {
         URL.revokeObjectURL(a.href);
     };
 
-    const handleUploadClick = () => {
-        fileInputRef.current?.click();
+    const handleCodeUploadClick = () => {
+        codeFileInputRef.current?.click();
     };
 
-    const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const handleCodeFileUpload = (
+        event: React.ChangeEvent<HTMLInputElement>
+    ) => {
         const file = event.target.files ? event.target.files[0] : null;
         if (!file) return;
 
         const extension = file.name.split('.').pop();
         if (!allowedExtensions.includes(extension || '')) {
-            setError(
+            setFileError(
                 `Only the following file types are allowed: ${allowedExtensions.join(
                     ', '
                 )}`
@@ -163,7 +186,7 @@ function App() {
             return;
         }
 
-        setError('');
+        setFileError('');
         setSelectedLang('');
         const extensionToLanguage = (ext: string) =>
             ({
@@ -183,6 +206,177 @@ function App() {
 
         event.target.value = '';
     };
+
+    const handleInputUploadClick = () => {
+        inputFileInputRef.current?.click();
+    };
+
+    const handleInputFileUpload = (
+        event: React.ChangeEvent<HTMLInputElement>
+    ) => {
+        const file = event.target.files ? event.target.files[0] : null;
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            setUserInput(e.target?.result as string);
+        };
+        reader.readAsText(file);
+
+        event.target.value = '';
+    };
+
+    function needsInput(code: string) {
+        const inputPatterns: { [key: string]: RegExp } = {
+            python: /\binput\s*\(/,
+            javascript: /\b(prompt|readline|process\.stdin)/,
+            java: /new\s+Scanner\s*\(\s*System\.in\s*\)/,
+            cpp: /cin\s*>>|getline\s*\(\s*cin/,
+            go: /bufio\.NewReader\s*\(\s*os\.Stdin\s*\)/,
+        };
+
+        const regex = inputPatterns[selectedLang];
+
+        if (regex.test(code) && userInput.length === 0) {
+            alert('Please add an input file!');
+        } else {
+            refetch();
+        }
+    }
+
+    const handleSubmitCode = async () => {
+        const ext = languages.find((lang) => lang.id === selectedLang)?.ext;
+        const fileName = `code.${ext}`;
+        const blob = new Blob([code], { type: 'text/plain' });
+        const file = new File([blob], fileName, { type: 'text/plain' });
+
+        const formData = new FormData();
+        formData.append('code', file);
+        formData.append('language', selectedLang);
+
+        if (userInput.length > 0) {
+            const inputBlob = new Blob([userInput], { type: 'text/plain' });
+            const inputFile = new File([inputBlob], fileName, {
+                type: 'text/plain',
+            });
+            formData.append('stdin', inputFile);
+        }
+
+        try {
+            // Submit API
+            const res = await fetch(
+                'http://code-nexus-alb-617173639.us-east-2.elb.amazonaws.com/submit',
+                {
+                    method: 'POST',
+                    body: formData,
+                }
+            );
+            const result = await res.json();
+            console.log('Submit Result:', result);
+            return result;
+        } catch (err) {
+            console.error('Upload failed:', err);
+            setOutput(JSON.stringify(err));
+        }
+    };
+
+    const {
+        isFetching,
+        data,
+        isError,
+        error,
+        isSuccess,
+        refetch,
+    }: UseQueryResult<SubmitAPIResponse, Error> = useQuery({
+        queryKey: ['SubmitData', selectedLang],
+        queryFn: handleSubmitCode,
+        enabled: false,
+        refetchOnWindowFocus: false,
+    });
+
+    const submissionId = data?.submission_id;
+
+    const results = useQueries({
+        queries: [
+            // Query to get Execution Result
+            {
+                queryKey: ['executionResult', submissionId],
+                queryFn: async () => {
+                    const execRes = await fetch(
+                        `http://code-nexus-alb-617173639.us-east-2.elb.amazonaws.com/results/${submissionId}`
+                    );
+                    if (!execRes.ok) {
+                        throw new Error('Execution result not ready yet');
+                    }
+                    return execRes.json();
+                },
+                enabled: !!submissionId,
+                retry: 12,
+                retryDelay: 10000,
+                refetchOnWindowFocus: false,
+            },
+            //   Query to get Static Analysis Result
+            {
+                queryKey: ['staticAnalysisResult', submissionId],
+                queryFn: async () => {
+                    const anaRes = await fetch(
+                        `http://code-nexus-alb-617173639.us-east-2.elb.amazonaws.com/analysis/${submissionId}`
+                    );
+                    if (!anaRes.ok) {
+                        throw new Error('Static analysis result not ready yet');
+                    }
+                    return anaRes.json();
+                },
+                enabled: !!submissionId,
+                retry: 12,
+                retryDelay: 10000,
+                refetchOnWindowFocus: false,
+            },
+        ],
+    }) as [
+        UseQueryResult<ExecAPIResponse>,
+        UseQueryResult<StaticAnaAPIResponse>
+    ];
+
+    useEffect(() => {
+        if (isFetching || results[0].isFetching || results[1].isFetching) {
+            setOutput('');
+            const dots = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let i = 0;
+
+            loadingIntervalRef.current = setInterval(() => {
+                setOutput(`${dots[i]} Executing...\n`);
+                i = (i + 1) % dots.length;
+            }, 100);
+        }
+
+        return () => {
+            if (loadingIntervalRef.current) {
+                clearInterval(loadingIntervalRef.current);
+                loadingIntervalRef.current = null;
+            }
+        };
+    }, [isFetching, results[0].isFetching, results[1].isFetching]);
+
+    useEffect(() => {
+        if (isSuccess && results[0].isSuccess && results[1].isSuccess) {
+            setOutput(
+                results[0].data.stdout
+            );
+        }
+    }, [isSuccess, results[0].isSuccess, results[1].isSuccess]);
+
+    useEffect(() => {
+        if (isError || results[0].isError || results[1].isError) {
+            setOutput(
+                'There was an error:\n' +
+                    (error ? error : '') +
+                    results[0].error +
+                    '\n' +
+                    results[1].error
+            );
+        }
+    }, [isError, results[0].isError, results[1].isError]);
 
     useEffect(() => {
         if (preRef.current) {
@@ -277,6 +471,7 @@ function App() {
                                 theme === 'dark' ? 'bg-gray-800' : 'bg-white'
                             } flex-1 flex flex-col`}
                         >
+                            {/* Sub-header */}
                             <div className="border-b border-gray-700 p-4 flex items-center justify-between">
                                 <div className="flex items-center space-x-4">
                                     <span className="text-sm font-semibold">
@@ -289,7 +484,7 @@ function App() {
                                     <motion.button
                                         whileHover={{ scale: 1.05 }}
                                         whileTap={{ scale: 0.95 }}
-                                        onClick={handleRunCode}
+                                        onClick={() => needsInput(code)}
                                         className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition"
                                     >
                                         <Play className="h-4 w-4" />
@@ -304,7 +499,7 @@ function App() {
                                                 : Icon === Copy
                                                 ? handleCopyCode
                                                 : Icon === Upload
-                                                ? handleUploadClick
+                                                ? handleCodeUploadClick
                                                 : undefined;
                                         return (
                                             <motion.button
@@ -323,17 +518,21 @@ function App() {
                                         );
                                     })}
                                     <input
-                                        ref={fileInputRef}
+                                        ref={codeFileInputRef}
                                         type="file"
                                         accept=".py,.js,.java,.cpp,.go"
-                                        onChange={handleFileUpload}
+                                        onChange={handleCodeFileUpload}
                                         style={{ display: 'none' }}
                                     />
-                                    {error && (
-                                        <p className="text-red-500">{error}</p>
+                                    {fileError && (
+                                        <p className="text-red-500">
+                                            {fileError}
+                                        </p>
                                     )}
                                 </div>
                             </div>
+
+                            {/* Top - Code */}
                             <div className="code-editor flex-1">
                                 <textarea
                                     value={code}
@@ -353,6 +552,32 @@ function App() {
                                             : 'bg-white'
                                     }`}
                                 ></pre>
+                            </div>
+
+                            {/* Bottom - Input */}
+                            <div className="h-1/3 bg-gray-900 border-t border-r flex flex-col">
+                                <div className="ml-auto px-2 py-1">
+                                    <motion.button
+                                        onClick={() => handleInputUploadClick()}
+                                        whileHover={{ scale: 1.1 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className={`flex gap-2 border border-slate-600 py-1 px-2 rounded-lg ${
+                                            theme === 'dark'
+                                                ? 'hover:bg-gray-700'
+                                                : 'hover:bg-gray-100'
+                                        } transition`}
+                                    >
+                                        Input File <Upload />
+                                    </motion.button>
+                                    <input
+                                        ref={inputFileInputRef}
+                                        type="file"
+                                        accept=".txt"
+                                        onChange={handleInputFileUpload}
+                                        style={{ display: 'none' }}
+                                    />
+                                </div>
+                                <pre>{userInput}</pre>
                             </div>
                         </div>
                     </motion.div>
@@ -375,6 +600,80 @@ function App() {
                         }`}
                     >
                         {output || 'Run your code to see the output here...'}
+                        {results[1].isSuccess && (
+                            <div className="space-y-8">
+                            <div>
+                              <h3 className="text-lg font-bold">Static Analysis Metrics</h3>
+                      
+                              <div className="grid grid-cols-2 gap-4 mt-4">
+                                <div>
+                                  <h4 className="font-semibold mb-2">Confidence Levels</h4>
+                                  <ul className="list-disc list-inside">
+                                    <li>High: {results[1].data.analysis.metrics['./code.py']['CONFIDENCE.HIGH']}</li>
+                                    <li>Medium: {results[1].data.analysis.metrics['./code.py']['CONFIDENCE.MEDIUM']}</li>
+                                    <li>Low: {results[1].data.analysis.metrics['./code.py']['CONFIDENCE.LOW']}</li>
+                                    <li>Undefined: {results[1].data.analysis.metrics['./code.py']['CONFIDENCE.UNDEFINED']}</li>
+                                  </ul>
+                                </div>
+                      
+                                <div>
+                                  <h4 className="font-semibold mb-2">Severity Levels</h4>
+                                  <ul className="list-disc list-inside">
+                                    <li>High: {results[1].data.analysis.metrics['./code.py']['SEVERITY.HIGH']}</li>
+                                    <li>Medium: {results[1].data.analysis.metrics['./code.py']['SEVERITY.MEDIUM']}</li>
+                                    <li>Low: {results[1].data.analysis.metrics['./code.py']['SEVERITY.LOW']}</li>
+                                    <li>Undefined: {results[1].data.analysis.metrics['./code.py']['SEVERITY.UNDEFINED']}</li>
+                                  </ul>
+                                </div>
+                      
+                                <div>
+                                  <h4 className="font-semibold mb-2">Other Metrics</h4>
+                                  <ul className="list-disc list-inside">
+                                    <li>Lines of Code (LOC): {results[1].data.analysis.metrics['./code.py']['loc']}</li>
+                                    <li>Nosec Tags: {results[1].data.analysis.metrics['./code.py']['nosec']}</li>
+                                    <li>Skipped Tests: {results[1].data.analysis.metrics['./code.py']['skipped_tests']}</li>
+                                  </ul>
+                                </div>
+                              </div>
+                            </div>
+                      
+                            {/* Totals Section */}
+                            <div>
+                              <h3 className="text-lg font-bold">Overall Totals</h3>
+                      
+                              <div className="grid grid-cols-2 gap-4 mt-4">
+                                <div>
+                                  <h4 className="font-semibold mb-2">Total Confidence</h4>
+                                  <ul className="list-disc list-inside">
+                                    <li>High: {results[1].data.analysis.metrics._totals['CONFIDENCE.HIGH']}</li>
+                                    <li>Medium: {results[1].data.analysis.metrics._totals['CONFIDENCE.MEDIUM']}</li>
+                                    <li>Low: {results[1].data.analysis.metrics._totals['CONFIDENCE.LOW']}</li>
+                                    <li>Undefined: {results[1].data.analysis.metrics._totals['CONFIDENCE.UNDEFINED']}</li>
+                                  </ul>
+                                </div>
+                      
+                                <div>
+                                  <h4 className="font-semibold mb-2">Total Severity</h4>
+                                  <ul className="list-disc list-inside">
+                                    <li>High: {results[1].data.analysis.metrics._totals['SEVERITY.HIGH']}</li>
+                                    <li>Medium: {results[1].data.analysis.metrics._totals['SEVERITY.MEDIUM']}</li>
+                                    <li>Low: {results[1].data.analysis.metrics._totals['SEVERITY.LOW']}</li>
+                                    <li>Undefined: {results[1].data.analysis.metrics._totals['SEVERITY.UNDEFINED']}</li>
+                                  </ul>
+                                </div>
+                      
+                                <div>
+                                  <h4 className="font-semibold mb-2">Other Totals</h4>
+                                  <ul className="list-disc list-inside">
+                                    <li>Total LOC: {results[1].data.analysis.metrics._totals['loc']}</li>
+                                    <li>Total Nosec Tags: {results[1].data.analysis.metrics._totals['nosec']}</li>
+                                    <li>Total Skipped Tests: {results[1].data.analysis.metrics._totals['skipped_tests']}</li>
+                                  </ul>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                     </div>
                 </motion.div>
             </main>
