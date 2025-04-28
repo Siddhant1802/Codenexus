@@ -64,12 +64,6 @@ type StaticAnaAPIResponse = {
 
 const languages = [
     { id: 'python', name: 'Python', src: '/python-logo.svg', ext: 'py' },
-    {
-        id: 'javascript',
-        name: 'JavaScript',
-        src: '/javascript-logo.svg',
-        ext: 'js',
-    },
     { id: 'java', name: 'Java', src: '/java-icon.svg', ext: 'java' },
     { id: 'cpp', name: 'C++', src: '/cpp.svg', ext: 'cpp' },
     { id: 'go', name: 'Go', src: 'go-gopher.svg', ext: 'go' },
@@ -82,16 +76,10 @@ const starterTemplates = {
 message = "Try CodeNexus"
 print(message)`,
 
-    javascript: `// JavaScript Online Compiler
-// Write your JavaScript code here and click Run to execute
-
-const message = "Try CodeNexus";
-console.log(message);`,
-
     java: `// Java Online Compiler
 // Write your Java code here and click Run to execute
 
-class Main {
+class Code {
     public static void main(String[] args) {
         String message = "Try CodeNexus";
         System.out.println(message);
@@ -128,6 +116,7 @@ function App() {
     const [code, setCode] = useState(starterTemplates.python);
     const [userInput, setUserInput] = useState('');
     const [output, setOutput] = useState('');
+    const [showStaticAnalysisOutput, setShowStaticAnalysisOutput] = useState(false);
     const [theme, setTheme] = useState('dark');
     const preRef = useRef<HTMLPreElement>(null);
 
@@ -135,7 +124,7 @@ function App() {
 
     // States for handling file upload functionality
     const [fileError, setFileError] = useState('');
-    const allowedExtensions = ['py', 'js', 'java', 'cpp', 'go'];
+    const allowedExtensions = ['py', 'java', 'cpp', 'go'];
     const codeFileInputRef = useRef<HTMLInputElement>(null);
     const inputFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -191,7 +180,6 @@ function App() {
         const extensionToLanguage = (ext: string) =>
             ({
                 py: 'python',
-                js: 'javascript',
                 java: 'java',
                 cpp: 'cpp',
                 go: 'go',
@@ -229,7 +217,6 @@ function App() {
     function needsInput(code: string) {
         const inputPatterns: { [key: string]: RegExp } = {
             python: /\binput\s*\(/,
-            javascript: /\b(prompt|readline|process\.stdin)/,
             java: /new\s+Scanner\s*\(\s*System\.in\s*\)/,
             cpp: /cin\s*>>|getline\s*\(\s*cin/,
             go: /bufio\.NewReader\s*\(\s*os\.Stdin\s*\)/,
@@ -362,13 +349,14 @@ function App() {
         if (isSuccess && results[0].isSuccess && results[1].isSuccess) {
             console.log(results[0].data);
             console.log(results[1].data);
-            
-            if(results[0].data.status === 'success'){
+
+            if (results[0].data.status === 'success') {
                 setOutput(results[0].data.stdout);
             } else {
                 setOutput(results[0].data.stderr);
             }
         }
+        setShowStaticAnalysisOutput(true);
     }, [isSuccess, results[0].isSuccess, results[1].isSuccess]);
 
     useEffect(() => {
@@ -386,17 +374,291 @@ function App() {
     useEffect(() => {
         if (preRef.current) {
             const commentRegex =
-                selectedLang === 'python' || selectedLang === 'ruby'
-                    ? /(#.+)$/gm
-                    : /(\/\/.+)$/gm;
+                selectedLang === 'python' ? /(#.+)$/gm : /(\/\/.+)$/gm;
 
             const highlightedCode = code.replace(
                 commentRegex,
                 '<span class="comment">$1</span>'
             );
             preRef.current.innerHTML = highlightedCode;
+            setUserInput('');
+            setOutput('');
+            setShowStaticAnalysisOutput(false);
         }
     }, [code, selectedLang]);
+
+    const staticAnalysisOutput = (language: string) => {
+        if (
+            results[0].isSuccess &&
+            results[0].data.status === 'success' &&
+            results[1].isSuccess &&
+            results[1].data.success
+        ) {
+            if (language === 'python') {
+                return (
+                    <div className="space-y-8 mt-8 border-t pt-2">
+                        <div>
+                            <h3 className="text-lg font-bold">
+                                Static Analysis Metrics
+                            </h3>
+
+                            <div className="grid grid-cols-2 gap-4 mt-4">
+                                <div>
+                                    <h4 className="font-semibold mb-2">
+                                        Confidence Levels
+                                    </h4>
+                                    <ul className="list-disc list-inside">
+                                        <li>
+                                            High:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'CONFIDENCE.HIGH'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Medium:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'CONFIDENCE.MEDIUM'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Low:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'CONFIDENCE.LOW'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Undefined:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'CONFIDENCE.UNDEFINED'
+                                                ]
+                                            }
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div>
+                                    <h4 className="font-semibold mb-2">
+                                        Severity Levels
+                                    </h4>
+                                    <ul className="list-disc list-inside">
+                                        <li>
+                                            High:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'SEVERITY.HIGH'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Medium:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'SEVERITY.MEDIUM'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Low:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'SEVERITY.LOW'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Undefined:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'SEVERITY.UNDEFINED'
+                                                ]
+                                            }
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div>
+                                    <h4 className="font-semibold mb-2">
+                                        Other Metrics
+                                    </h4>
+                                    <ul className="list-disc list-inside">
+                                        <li>
+                                            Lines of Code (LOC):{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py']['loc']
+                                            }
+                                        </li>
+                                        <li>
+                                            Nosec Tags:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'nosec'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Skipped Tests:{' '}
+                                            {
+                                                results[1].data.analysis
+                                                    .metrics['./code.py'][
+                                                    'skipped_tests'
+                                                ]
+                                            }
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Totals Section */}
+                        <div>
+                            <h3 className="text-lg font-bold">
+                                Overall Totals
+                            </h3>
+
+                            <div className="grid grid-cols-2 gap-4 mt-4">
+                                <div>
+                                    <h4 className="font-semibold mb-2">
+                                        Total Confidence
+                                    </h4>
+                                    <ul className="list-disc list-inside">
+                                        <li>
+                                            High:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['CONFIDENCE.HIGH']
+                                            }
+                                        </li>
+                                        <li>
+                                            Medium:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals[
+                                                    'CONFIDENCE.MEDIUM'
+                                                ]
+                                            }
+                                        </li>
+                                        <li>
+                                            Low:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['CONFIDENCE.LOW']
+                                            }
+                                        </li>
+                                        <li>
+                                            Undefined:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals[
+                                                    'CONFIDENCE.UNDEFINED'
+                                                ]
+                                            }
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div>
+                                    <h4 className="font-semibold mb-2">
+                                        Total Severity
+                                    </h4>
+                                    <ul className="list-disc list-inside">
+                                        <li>
+                                            High:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['SEVERITY.HIGH']
+                                            }
+                                        </li>
+                                        <li>
+                                            Medium:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['SEVERITY.MEDIUM']
+                                            }
+                                        </li>
+                                        <li>
+                                            Low:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['SEVERITY.LOW']
+                                            }
+                                        </li>
+                                        <li>
+                                            Undefined:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals[
+                                                    'SEVERITY.UNDEFINED'
+                                                ]
+                                            }
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div>
+                                    <h4 className="font-semibold mb-2">
+                                        Other Totals
+                                    </h4>
+                                    <ul className="list-disc list-inside">
+                                        <li>
+                                            Total LOC:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['loc']
+                                            }
+                                        </li>
+                                        <li>
+                                            Total Nosec Tags:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['nosec']
+                                            }
+                                        </li>
+                                        <li>
+                                            Total Skipped Tests:{' '}
+                                            {
+                                                results[1].data.analysis.metrics
+                                                    ._totals['skipped_tests']
+                                            }
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            } else {
+                return (
+                    <div className='mt-8 border-t pt-2'>
+                        <h3 className="text-lg font-bold">
+                            Static Analysis Results
+                        </h3>
+                        <pre>
+                            {/* @ts-ignore */}
+                            {results[1].data.analysis.raw_output}
+                        </pre>
+                    </div>
+                );
+            }
+        }
+        return;
+    };
 
     return (
         <div
@@ -525,7 +787,7 @@ function App() {
                                     <input
                                         ref={codeFileInputRef}
                                         type="file"
-                                        accept=".py,.js,.java,.cpp,.go"
+                                        accept=".py,.java,.cpp,.go"
                                         onChange={handleCodeFileUpload}
                                         style={{ display: 'none' }}
                                     />
@@ -560,7 +822,7 @@ function App() {
                             </div>
 
                             {/* Bottom - Input */}
-                            <div className="h-1/3 bg-gray-900 border-t border-r flex flex-col">
+                            <div className="h-1/3 border-t border-r flex flex-col">
                                 <div className="ml-auto px-2 py-1">
                                     <motion.button
                                         onClick={() => handleInputUploadClick()}
@@ -605,274 +867,7 @@ function App() {
                         }`}
                     >
                         {output || 'Run your code to see the output here...'}
-                        {(results[1].isSuccess && results[1].data.success && results[0].isSuccess && results[0].data.status === 'success') && (
-                            <div className="space-y-8 mt-8 border-t pt-2">
-                                <div>
-                                    <h3 className="text-lg font-bold">
-                                        Static Analysis Metrics
-                                    </h3>
-
-                                    <div className="grid grid-cols-2 gap-4 mt-4">
-                                        <div>
-                                            <h4 className="font-semibold mb-2">
-                                                Confidence Levels
-                                            </h4>
-                                            <ul className="list-disc list-inside">
-                                                <li>
-                                                    High:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['CONFIDENCE.HIGH']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Medium:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['CONFIDENCE.MEDIUM']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Low:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['CONFIDENCE.LOW']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Undefined:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ][
-                                                            'CONFIDENCE.UNDEFINED'
-                                                        ]
-                                                    }
-                                                </li>
-                                            </ul>
-                                        </div>
-
-                                        <div>
-                                            <h4 className="font-semibold mb-2">
-                                                Severity Levels
-                                            </h4>
-                                            <ul className="list-disc list-inside">
-                                                <li>
-                                                    High:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['SEVERITY.HIGH']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Medium:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['SEVERITY.MEDIUM']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Low:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['SEVERITY.LOW']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Undefined:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['SEVERITY.UNDEFINED']
-                                                    }
-                                                </li>
-                                            </ul>
-                                        </div>
-
-                                        <div>
-                                            <h4 className="font-semibold mb-2">
-                                                Other Metrics
-                                            </h4>
-                                            <ul className="list-disc list-inside">
-                                                <li>
-                                                    Lines of Code (LOC):{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['loc']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Nosec Tags:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['nosec']
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Skipped Tests:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics[
-                                                            './code.py'
-                                                        ]['skipped_tests']
-                                                    }
-                                                </li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Totals Section */}
-                                <div>
-                                    <h3 className="text-lg font-bold">
-                                        Overall Totals
-                                    </h3>
-
-                                    <div className="grid grid-cols-2 gap-4 mt-4">
-                                        <div>
-                                            <h4 className="font-semibold mb-2">
-                                                Total Confidence
-                                            </h4>
-                                            <ul className="list-disc list-inside">
-                                                <li>
-                                                    High:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'CONFIDENCE.HIGH'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Medium:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'CONFIDENCE.MEDIUM'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Low:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'CONFIDENCE.LOW'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Undefined:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'CONFIDENCE.UNDEFINED'
-                                                        ]
-                                                    }
-                                                </li>
-                                            </ul>
-                                        </div>
-
-                                        <div>
-                                            <h4 className="font-semibold mb-2">
-                                                Total Severity
-                                            </h4>
-                                            <ul className="list-disc list-inside">
-                                                <li>
-                                                    High:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'SEVERITY.HIGH'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Medium:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'SEVERITY.MEDIUM'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Low:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'SEVERITY.LOW'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Undefined:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'SEVERITY.UNDEFINED'
-                                                        ]
-                                                    }
-                                                </li>
-                                            </ul>
-                                        </div>
-
-                                        <div>
-                                            <h4 className="font-semibold mb-2">
-                                                Other Totals
-                                            </h4>
-                                            <ul className="list-disc list-inside">
-                                                <li>
-                                                    Total LOC:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'loc'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Total Nosec Tags:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'nosec'
-                                                        ]
-                                                    }
-                                                </li>
-                                                <li>
-                                                    Total Skipped Tests:{' '}
-                                                    {
-                                                        results[1].data.analysis
-                                                            .metrics._totals[
-                                                            'skipped_tests'
-                                                        ]
-                                                    }
-                                                </li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                        {showStaticAnalysisOutput && staticAnalysisOutput(selectedLang)}
                     </div>
                 </motion.div>
             </main>
