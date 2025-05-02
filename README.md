@@ -70,4 +70,4 @@ This React app communicates with a backend powered by FastAPI and deployed on AW
 
 ## 📜 License
 
-This project is built as part of **ENGR-E516 Cloud Computing** (Spring 2025), Indiana University Bloomington.
+This project is built as part of **ENGR-E516 Engineering Cloud Computing** (Spring 2025), Indiana University Bloomington.
